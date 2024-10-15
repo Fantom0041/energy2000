@@ -32,12 +32,27 @@ async function login() {
         });
 
         console.log(`Making login request to: ${loginUrl.toString()}`);
-        const response = await axios.get(loginUrl.toString() );
+        const response = await axios.get(loginUrl.toString());
 
         console.log(`Received login response. Status: ${response.status}`);
-        // Here you might want to check the response for a successful login
-        // and possibly store a session token if the API provides one
-        return response.data;
+        console.log(`Response data: ${response.data}`);
+        
+        // Parse the XML response
+        const parsedResponse = await xml2js.parseStringPromise(response.data);
+        
+        // Extract the session token from the parsed response
+        const sessionToken = parsedResponse.logged.session[0];
+        
+        if (!sessionToken) {
+            throw new Error('Session token not found in the response');
+        }
+        
+        // Save the token to a file
+        const tokenFilePath = path.join(__dirname, 'token.txt');
+        fs.writeFileSync(tokenFilePath, sessionToken, 'utf-8');
+        console.log(`Session token saved to file: ${tokenFilePath}`);
+
+        return sessionToken;
     } catch (error) {
         console.error('Error during login:', error.message);
         throw error;
@@ -47,12 +62,16 @@ async function login() {
 async function authenticateAndFetchData(date) {
     console.log(`Attempting to fetch data for date: ${date}`);
     try {
-        // First, log in
-        await login();
+        // First, log in and get the session token
+        const sessionToken = await login();
 
         const url = `${config.ENDPOINTURL}/service.php/api_omomo/Passes.json?date=${date}`;
         console.log(`Making request to: ${url}`);
-        const response = await axios.get(url);
+        const response = await axios.get(url, {
+            headers: {
+                'Cookie': `PHPSESSID=${sessionToken}`
+            }
+        });
         console.log(`Received response for date ${date}. Status: ${response.status}`);
         const xmlData = response.data;
         console.log('Parsing XML data to JSON');
