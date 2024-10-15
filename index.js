@@ -9,9 +9,14 @@ const cron = require('node-cron');
 const app = express();
 const port = process.env.PORT || 3000;
 
+
+const url = `https://domena klubu/service.php/api_omomo/Passes.json?date=2021-05-01`
+const outputFolder = 'json';
+const interval = 5000;
+
 async function fetchData(date) {
     try {
-        const response = await axios.get(`${process.env.API_URL}?date=${date}`);
+        const response = await axios.get(url);
         const xmlData = response.data;
         const jsonData = await xml2js.parseStringPromise(xmlData);
         return jsonData;
@@ -22,7 +27,8 @@ async function fetchData(date) {
 }
 
 function saveTicketsToFile(jsonData, date) {
-    const outputFolder = process.env.OUTPUT_FOLDER;
+    // const outputFolder = process.env.OUTPUT_FOLDER;
+    // const outputFolder = 'json';
     if (!fs.existsSync(outputFolder)) {
         fs.mkdirSync(outputFolder, { recursive: true });
     }
@@ -42,10 +48,9 @@ async function fetchAndSaveTickets() {
     }
 }
 
-// Uruchom zadanie cron zgodnie z ustawionym interwałem
-cron.schedule(process.env.FETCH_INTERVAL, fetchAndSaveTickets);
+// cron.schedule(process.env.FETCH_INTERVAL, fetchAndSaveTickets);
+cron.schedule(interval, fetchAndSaveTickets);
 
-// Endpoint do ręcznego uruchomienia pobierania danych
 app.get('/fetch', async (req, res) => {
     try {
         await fetchAndSaveTickets();
@@ -59,5 +64,4 @@ app.listen(port, () => {
     console.log(`Serwer nasłuchuje na porcie ${port}`);
 });
 
-// Pierwsze pobranie danych przy uruchomieniu serwera
 fetchAndSaveTickets();
