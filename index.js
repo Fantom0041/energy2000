@@ -8,7 +8,7 @@ const cron = require('node-cron');
 const ini = require('ini');
 const querystring = require('querystring');
 
-console.log('Starting application...');
+
 
 // Read configuration from visualtk.ini
 const config = ini.parse(fs.readFileSync('./visualtk.ini', 'utf-8'));
@@ -59,27 +59,58 @@ async function login() {
     }
 }
 
-async function authenticateAndFetchData(date) {
+async function authenticateAndFetchData(date, retryCount = 0) {
     console.log(`Attempting to fetch data for date: ${date}`);
     try {
         // First, log in and get the session token
         const sessionToken = await login();
 
+        // Add a small delay to ensure the session is established
+        await new Promise(resolve => setTimeout(resolve, 1000));
+
         const url = `${config.ENDPOINTURL}/service.php/api_omomo/Passes.json?date=${date}`;
         console.log(`Making request to: ${url}`);
         const response = await axios.get(url, {
             headers: {
-                'Cookie': `PHPSESSID=${sessionToken}`
+                'Cookie': `PHPSESSID=${sessionToken}; symfony=${sessionToken}`,
+                'Accept': 'application/json',
+                'User-Agent': 'YourAppName/1.0',  // Replace with your app name and version
+                'X-Requested-With': 'XMLHttpRequest'
+            },
+            validateStatus: function (status) {
+                return status < 500; // Resolve only if the status code is less than 500
             }
         });
+        
         console.log(`Received response for date ${date}. Status: ${response.status}`);
-        const xmlData = response.data;
-        console.log('Parsing XML data to JSON');
-        const jsonData = await xml2js.parseStringPromise(xmlData);
-        console.log('XML successfully parsed to JSON');
+        console.log(`Response headers:`, response.headers);
+        console.log(`Response data:`, response.data);
+
+        if (response.status === 401 || (response.status === 500 && response.data.code === 401)) {
+            if (retryCount < 3) {
+                console.log(`Authentication failed. Retrying... (Attempt ${retryCount + 1})`);
+                return authenticateAndFetchData(date, retryCount + 1);
+            } else {
+                throw new Error('Authentication failed after multiple attempts');
+            }
+        }
+
+        if (response.status !== 200) {
+            throw new Error(`Unexpected status code: ${response.status}`);
+        }
+
+        const jsonData = response.data;
+        console.log('Successfully retrieved JSON data');
         return jsonData;
     } catch (error) {
         console.error(`Error fetching data for date ${date}:`, error.message);
+        if (error.response) {
+            console.error('Error response:', error.response.data);
+            console.error('Error status:', error.response.status);
+            console.error('Error headers:', error.response.headers);
+        } else if (error.request) {
+            console.error('Error request:', error.request);
+        }
         throw error;
     }
 }
@@ -90,7 +121,7 @@ function saveTicketsToFile(jsonData, date) {
         console.log(`Creating output folder: ${outputFolder}`);
         fs.mkdirSync(outputFolder, { recursive: true });
     }
-    const filename = `tickets_${date}.json`;
+    const filename = `${date}.json`;
     const filePath = path.join(outputFolder, filename);
     fs.writeFileSync(filePath, JSON.stringify(jsonData, null, 2), 'utf-8');
     console.log(`Data saved to file: ${filePath}`);
@@ -98,58 +129,58 @@ function saveTicketsToFile(jsonData, date) {
 
 function updateLatestTicketDate(jsonData) {
     console.log('Updating latest ticket date');
-    // Assuming the JSON structure has a date field. Adjust this according to your actual data structure.
-    const ticketDates = jsonData.passes.pass.map(pass => new Date(pass.date[0]));
-    const maxDate = new Date(Math.max.apply(null, ticketDates));
-    if (!latestTicketDate || maxDate > latestTicketDate) {
-        latestTicketDate = maxDate;
-        console.log(`Latest ticket date updated to: ${latestTicketDate.toISOString().split('T')[0]}`);
+    if (jsonData.passes && Array.isArray(jsonData.passes)) {
+        const ticketDates = jsonData.passes.map(pass => new Date(pass.buy_date));
+        const maxDate = new Date(Math.max.apply(null, ticketDates));
+        if (!latestTicketDate || maxDate > latestTicketDate) {
+            latestTicketDate = maxDate;
+            console.log(`Latest ticket date updated to: ${latestTicketDate.toISOString()}`);
+        } else {
+            console.log(`Latest ticket date remains: ${latestTicketDate.toISOString()}`);
+        }
     } else {
-        console.log(`Latest ticket date remains: ${latestTicketDate.toISOString().split('T')[0]}`);
+        console.log('No valid passes found in the data');
     }
 }
 
-async function fetchAndSaveTickets(date) {
-    console.log(`Starting fetch and save process for date: ${date}`);
+async function fetchAndSaveTickets() {
+    console.log('Starting fetch and save process');
     try {
-        const data = await authenticateAndFetchData(date);
-        saveTicketsToFile(data, date);
-        updateLatestTicketDate(data);
-        console.log(`Fetch and save process completed for date: ${date}`);
+        const currentDate = new Date();
+        const formattedDate = currentDate.toISOString().split('.')[0].replace('T', ' ');
+        console.log(`Fetching tickets for date: ${formattedDate}`);
+        
+        const data = await authenticateAndFetchData(formattedDate);
+        
+        if (data.passes && data.passes.length > 0) {
+            saveTicketsToFile(data, currentDate.toISOString().split('T')[0]);
+            updateLatestTicketDate(data);
+            console.log(`Fetch and save process completed for date: ${formattedDate}`);
+        } else {
+            console.log(`No new tickets found for date: ${formattedDate}`);
+        }
+        
         return data;
     } catch (error) {
-        console.error(`Error during fetch and save process for date ${date}:`, error.message);
+        console.error(`Error during fetch and save process:`, error.message);
     }
 }
 
-async function recursivelyFetchTickets() {
-    const today = new Date();
-    let currentDate = latestTicketDate ? new Date(latestTicketDate) : new Date(today.getFullYear(), today.getMonth(), today.getDate() - 1);
-    
-    // while (currentDate <= today) {
-        // const dateString = currentDate.toISOString().split('T')[0];
-    const dateString = '2021-05-01';
-        console.log(`Pobieranie biletów dla daty: ${dateString}`);
-        await fetchAndSaveTickets(dateString);
-        currentDate.setDate(currentDate.getDate() + 1);
-    // }
+function startPeriodicFetch() {
+    console.log('Starting periodic fetch');
+    setInterval(fetchAndSaveTickets, 20000); // Run every 20 seconds
 }
-
-// Schedule the task to run at the specified interval
-cron.schedule(interval, recursivelyFetchTickets);
 
 app.get('/fetch', async (req, res) => {
     try {
-        await recursivelyFetchTickets();
-        res.send('Dane zostały pobrane i zapisane.');
+        await fetchAndSaveTickets();
+        res.send('Data has been fetched and saved.');
     } catch (error) {
-        res.status(500).send('Wystąpił błąd podczas pobierania danych.');
+        res.status(500).send('An error occurred while fetching data.');
     }
 });
 
 app.listen(port, () => {
-    console.log(`Serwer nasłuchuje na porcie ${port}`);
+    console.log(`Server is listening on port ${port}`);
+    startPeriodicFetch(); // Start the periodic fetch when the server starts
 });
-
-// Initial fetch on startup
-recursivelyFetchTickets();
