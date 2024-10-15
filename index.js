@@ -14,10 +14,6 @@ console.log('Starting application...');
 const config = ini.parse(fs.readFileSync('./visualtk.ini', 'utf-8'));
 console.log('Configuration loaded from visualtk.ini');
 
-// Add proxy configuration
-const httpProxy = process.env.HTTP_PROXY || 'http://172.16.2.254:3128';
-const httpsProxy = process.env.HTTPS_PROXY || 'http://172.16.2.254:3128';
-console.log(`Proxy configuration set - HTTP: ${httpProxy}, HTTPS: ${httpsProxy}`);
 
 const app = express();
 const port = process.env.PORT || 3001;
