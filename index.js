@@ -12,12 +12,10 @@ const config = ini.parse(fs.readFileSync('./visualtk.ini', 'utf-8'));
 console.log('Configuration loaded from visualtk.ini');
 
 const app = express();
-const port = process.env.PORT || 3001;
+const port = process.env.PORT || 5001;
 
 // const outputFolder = '/tmp/vnintegration';
 const outputFolder = 'json';
-const interval = '*/5 * * * *'; // Run every 5 minutes
-let latestTicketDate = null;
 let eventList = [];
 
 // Ensure the output folder exists
@@ -89,61 +87,6 @@ async function login() {
     }
 }
 
-async function authenticateAndFetchData(date, retryCount = 0) {
-    console.log(`Attempting to fetch data for date: ${date}`);
-    try {
-        // First, log in and get the session token
-        const sessionToken = await login();
-
-        // Add a small delay to ensure the session is established
-        await new Promise(resolve => setTimeout(resolve, 1000));
-
-        const url = `${config.ENDPOINTURL}/service.php/api_omomo/Passes.json?date=${date}`;
-        console.log(`Making request to: ${url}`);
-        const response = await axios.get(url, {
-            headers: {
-                'Cookie': `PHPSESSID=${sessionToken}; symfony=${sessionToken}`,
-                'Accept': 'application/json',
-                'User-Agent': 'YourAppName/1.0',  // Replace with your app name and version
-                'X-Requested-With': 'XMLHttpRequest'
-            },
-            validateStatus: function (status) {
-                return status < 500; // Resolve only if the status code is less than 500
-            }
-        });
-        
-        console.log(`Received response for date ${date}. Status: ${response.status}`);
-        console.log(`Response headers:`, response.headers);
-        console.log(`Response data:`, response.data);
-
-        if (response.status === 401 || (response.status === 500 && response.data.code === 401)) {
-            if (retryCount < 3) {
-                console.log(`Authentication failed. Retrying... (Attempt ${retryCount + 1})`);
-                return authenticateAndFetchData(date, retryCount + 1);
-            } else {
-                throw new Error('Authentication failed after multiple attempts');
-            }
-        }
-
-        if (response.status !== 200) {
-            throw new Error(`Unexpected status code: ${response.status}`);
-        }
-
-        const jsonData = response.data;
-        console.log('Successfully retrieved JSON data');
-        return jsonData;
-    } catch (error) {
-        console.error(`Error fetching data for date ${date}:`, error.message);
-        if (error.response) {
-            console.error('Error response:', error.response.data);
-            console.error('Error status:', error.response.status);
-            console.error('Error headers:', error.response.headers);
-        } else if (error.request) {
-            console.error('Error request:', error.request);
-        }
-        throw error;
-    }
-}
 
 function saveTicketsToFile(tickets, eventId) {
     const timestamp = getFormattedTimestamp();
@@ -153,14 +96,6 @@ function saveTicketsToFile(tickets, eventId) {
     console.log(`Tickets saved to file: ${filePath}`);
 }
 
-function updateLatestTicketDate(tickets) {
-    const ticketDates = tickets.map(ticket => new Date(ticket.date));
-    const maxDate = new Date(Math.max.apply(null, ticketDates));
-    if (!latestTicketDate || maxDate > latestTicketDate) {
-        latestTicketDate = maxDate;
-        console.log(`Latest ticket date updated to: ${latestTicketDate.toISOString()}`);
-    }
-}
 
 async function fetchEventList() {
     console.log('Fetching event list...');
