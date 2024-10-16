@@ -27,6 +27,23 @@ if (!fs.existsSync(outputFolder)) {
 
 let sessionToken = null;
 
+function getFormattedTimestamp() {
+    const now = new Date();
+    return now.toISOString()
+        .replace('T', '_')
+        .replace(/:/g, '-')
+        .replace('Z', '') // Remove the trailing 'Z'
+        .split('.')[0]; // Remove milliseconds
+}
+
+function getTimestampedFilename(prefix, eventId = null) {
+    const timestamp = getFormattedTimestamp();
+    if (eventId !== null) {
+        return `${prefix}_${eventId}_${timestamp}.xml`;
+    }
+    return `${prefix}_${timestamp}.xml`;
+}
+
 async function login() {
     console.log('Attempting to log in...');
     try {
@@ -121,8 +138,10 @@ async function authenticateAndFetchData(date, retryCount = 0) {
     }
 }
 
-function saveTicketsToFile(tickets, filename) {
-    const filePath = path.join(outputFolder, `${filename}.json`);
+function saveTicketsToFile(tickets, eventId) {
+    const timestamp = getFormattedTimestamp();
+    const filename = `event_${eventId}_tickets_${timestamp}.json`;
+    const filePath = path.join(outputFolder, filename);
     fs.writeFileSync(filePath, JSON.stringify(tickets, null, 2), 'utf-8');
     console.log(`Tickets saved to file: ${filePath}`);
 }
@@ -150,9 +169,10 @@ async function fetchEventList() {
             }
         });
 
-        // Save raw XML response
-        fs.writeFileSync(path.join(outputFolder, 'response_getrepertoire.xml'), response.data);
-        console.log('Event list response saved to response_getrepertoire.xml');
+        // Save raw XML response with timestamp
+        const filename = getTimestampedFilename('response_getrepertoire');
+        fs.writeFileSync(path.join(outputFolder, filename), response.data);
+        console.log(`Event list response saved to ${filename}`);
 
         // Parse XML to JSON
         const parser = new xml2js.Parser({ explicitArray: false, mergeAttrs: true });
@@ -179,9 +199,10 @@ async function fetchTicketsForEvent(eventId) {
             }
         });
 
-        // Save raw XML response
-        fs.writeFileSync(path.join(outputFolder, `response_tickets_event_${eventId}.xml`), response.data);
-        console.log(`Tickets for event ${eventId} saved to response_tickets_event_${eventId}.xml`);
+        // Save raw XML response with timestamp
+        const filename = getTimestampedFilename('response_tickets_event', eventId);
+        fs.writeFileSync(path.join(outputFolder, filename), response.data);
+        console.log(`Tickets for event ${eventId} saved to ${filename}`);
 
         // Parse XML to JSON
         const parser = new xml2js.Parser({ explicitArray: false, mergeAttrs: true });
@@ -232,7 +253,7 @@ async function fetchTicketsForAllEvents() {
                 
                 console.log(`Found ${tickets.length} tickets for event: ${event.id}`);
                 
-                saveTicketsToFile(tickets, `event_${event.id}_${new Date().toISOString().split('T')[0]}`);
+                saveTicketsToFile(tickets, event.id);
             } else {
                 console.log(`No tickets found for event: ${event.id}`);
             }
