@@ -7,20 +7,22 @@ const path = require('path');
 const ini = require('ini');
 const querystring = require('querystring');
 
-
-
 // Read configuration from visualtk.ini
 const config = ini.parse(fs.readFileSync('./visualtk.ini', 'utf-8'));
 console.log('Configuration loaded from visualtk.ini');
 
-
 const app = express();
 const port = process.env.PORT || 3001;
 
-const outputFolder = 'json';
+const outputFolder = '/tmp/vnintegration';
 const interval = '*/5 * * * *'; // Run every 5 minutes
 let latestTicketDate = null;
 let eventList = [];
+
+// Ensure the output folder exists
+if (!fs.existsSync(outputFolder)) {
+    fs.mkdirSync(outputFolder, { recursive: true });
+}
 
 async function login() {
     console.log('Attempting to log in...');
@@ -38,11 +40,7 @@ async function login() {
         console.log(`Response data: ${response.data}`);
         
         // Save the raw XML response
-        fs.writeFileSync('response_login.xml', response.data);
-        console.log('Login response saved to response_login.xml');
-        
-        // Save the raw XML response
-        fs.writeFileSync('response_login.xml', response.data);
+        fs.writeFileSync(path.join(outputFolder, 'response_login.xml'), response.data);
         console.log('Login response saved to response_login.xml');
         
         // Parse the XML response
@@ -121,9 +119,6 @@ async function authenticateAndFetchData(date, retryCount = 0) {
 }
 
 function saveTicketsToFile(tickets, filename) {
-    if (!fs.existsSync(outputFolder)) {
-        fs.mkdirSync(outputFolder, { recursive: true });
-    }
     const filePath = path.join(outputFolder, `${filename}.json`);
     fs.writeFileSync(filePath, JSON.stringify(tickets, null, 2), 'utf-8');
     console.log(`Tickets saved to file: ${filePath}`);
@@ -152,7 +147,7 @@ async function fetchEventList(sessionToken) {
             }
         });
 
-        fs.writeFileSync('response_getrepertoire.xml', response.data);
+        fs.writeFileSync(path.join(outputFolder, 'response_getrepertoire.xml'), response.data);
         console.log('Event list response saved to response_getrepertoire.xml');
 
         // Parse XML to JSON
@@ -184,7 +179,7 @@ async function fetchTicketsForEvent(sessionToken, eventId) {
         });
 
         // Save raw XML response
-        fs.writeFileSync(`response_tickets_event_${eventId}.xml`, response.data);
+        fs.writeFileSync(path.join(outputFolder, `response_tickets_event_${eventId}.xml`), response.data);
         console.log(`Tickets for event ${eventId} saved to response_tickets_event_${eventId}.xml`);
 
         // Parse XML to JSON
@@ -283,6 +278,7 @@ app.get('/fetch-tickets', async (req, res) => {
 
 app.listen(port, () => {
     console.log(`Server is listening on port ${port}`);
+    console.log(`Output folder set to: ${outputFolder}`);
     startPeriodicEventListUpdate();
     startPeriodicTicketFetch();
 });
