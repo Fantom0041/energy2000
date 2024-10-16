@@ -27,6 +27,10 @@ if (!fs.existsSync(outputFolder)) {
 
 let sessionToken = null;
 
+// Add these new variables for intervals
+let eventListIntervalMs;
+let ticketsFetchIntervalMs;
+
 function getFormattedTimestamp() {
     const now = new Date();
     const year = now.getFullYear();
@@ -268,18 +272,18 @@ async function fetchTicketsForAllEvents() {
 
 function startPeriodicEventListUpdate() {
     console.log('Starting periodic event list update');
-    const intervalHours = config.EVENT_LIST_UPDATE_INTERVAL_HOURS || 6;
-    const intervalMs = intervalHours * 60 * 60 * 1000;
+    const intervalHours = config.EVENT_LIST_UPDATE_INTERVAL_HOURS || 4; // Default to 4 hours if not specified in ini
+    eventListIntervalMs = intervalHours * 60 * 60 * 1000;
     console.log(`Event list update interval set to ${intervalHours} hours`);
-    setInterval(updateEventList, intervalMs);
-    updateEventList(); // Run immediately on start
+    setInterval(updateEventList, eventListIntervalMs);
 }
 
 function startPeriodicTicketFetch() {
     console.log('Starting periodic ticket fetch');
-    const intervalSeconds = config.TICKET_FETCH_INTERVAL_SECONDS || 60;
+    const intervalSeconds = config.TICKET_FETCH_INTERVAL_SECONDS || 20; // Default to 20 seconds if not specified in ini
+    ticketsFetchIntervalMs = intervalSeconds * 1000;
     console.log(`Ticket fetch interval set to ${intervalSeconds} seconds`);
-    setInterval(fetchTicketsForAllEvents, intervalSeconds * 1000);
+    setInterval(fetchTicketsForAllEvents, ticketsFetchIntervalMs);
 }
 
 app.get('/fetch-events', async (req, res) => {
@@ -300,9 +304,19 @@ app.get('/fetch-tickets', async (req, res) => {
     }
 });
 
-app.listen(port, () => {
+app.listen(port, async () => {
     console.log(`Server is listening on port ${port}`);
     console.log(`Output folder set to: ${outputFolder}`);
+    
+    // Initial data fetch on server start
+    try {
+        await updateEventList(); // This will also fetch tickets for all events
+        console.log('Initial data fetch completed');
+    } catch (error) {
+        console.error('Error during initial data fetch:', error.message);
+    }
+
+    // Start periodic updates
     startPeriodicEventListUpdate();
     startPeriodicTicketFetch();
 });
