@@ -4,7 +4,6 @@ const axios = require('axios');
 const xml2js = require('xml2js');
 const fs = require('fs');
 const path = require('path');
-const cron = require('node-cron');
 const ini = require('ini');
 const querystring = require('querystring');
 
@@ -21,6 +20,7 @@ const port = process.env.PORT || 3001;
 const outputFolder = 'json';
 const interval = '*/5 * * * *'; // Run every 5 minutes
 let latestTicketDate = null;
+let eventList = [];
 
 async function login() {
     console.log('Attempting to log in...');
@@ -37,6 +37,10 @@ async function login() {
         console.log(`Received login response. Status: ${response.status}`);
         console.log(`Response data: ${response.data}`);
         
+        // Save the raw XML response
+        fs.writeFileSync('response_login.xml', response.data);
+        console.log('Login response saved to response_login.xml');
+        
         // Parse the XML response
         const parsedResponse = await xml2js.parseStringPromise(response.data);
         
@@ -47,11 +51,8 @@ async function login() {
             throw new Error('Session token not found in the response');
         }
         
-        // Save the token to a file
-        const tokenFilePath = path.join(__dirname, 'token.txt');
-        fs.writeFileSync(tokenFilePath, sessionToken, 'utf-8');
-        console.log(`Session token saved to file: ${tokenFilePath}`);
-
+        console.log(`SESSION ${sessionToken}`);
+        
         return sessionToken;
     } catch (error) {
         console.error('Error during login:', error.message);
@@ -115,72 +116,169 @@ async function authenticateAndFetchData(date, retryCount = 0) {
     }
 }
 
-function saveTicketsToFile(jsonData, date) {
-    console.log(`Saving tickets for date: ${date}`);
+function saveTicketsToFile(tickets, filename) {
     if (!fs.existsSync(outputFolder)) {
-        console.log(`Creating output folder: ${outputFolder}`);
         fs.mkdirSync(outputFolder, { recursive: true });
     }
-    const filename = `${date}.json`;
-    const filePath = path.join(outputFolder, filename);
-    fs.writeFileSync(filePath, JSON.stringify(jsonData, null, 2), 'utf-8');
-    console.log(`Data saved to file: ${filePath}`);
+    const filePath = path.join(outputFolder, `${filename}.json`);
+    fs.writeFileSync(filePath, JSON.stringify(tickets, null, 2), 'utf-8');
+    console.log(`Tickets saved to file: ${filePath}`);
 }
 
-function updateLatestTicketDate(jsonData) {
-    console.log('Updating latest ticket date');
-    if (jsonData.passes && Array.isArray(jsonData.passes)) {
-        const ticketDates = jsonData.passes.map(pass => new Date(pass.buy_date));
-        const maxDate = new Date(Math.max.apply(null, ticketDates));
-        if (!latestTicketDate || maxDate > latestTicketDate) {
-            latestTicketDate = maxDate;
-            console.log(`Latest ticket date updated to: ${latestTicketDate.toISOString()}`);
-        } else {
-            console.log(`Latest ticket date remains: ${latestTicketDate.toISOString()}`);
-        }
-    } else {
-        console.log('No valid passes found in the data');
+function updateLatestTicketDate(tickets) {
+    const ticketDates = tickets.map(ticket => new Date(ticket.date));
+    const maxDate = new Date(Math.max.apply(null, ticketDates));
+    if (!latestTicketDate || maxDate > latestTicketDate) {
+        latestTicketDate = maxDate;
+        console.log(`Latest ticket date updated to: ${latestTicketDate.toISOString()}`);
     }
 }
 
-async function fetchAndSaveTickets() {
-    console.log('Starting fetch and save process');
+async function fetchEventList(sessionToken) {
+    console.log('Fetching event list...');
     try {
-        const currentDate = new Date();
-        const formattedDate = currentDate.toISOString().split('.')[0].replace('T', ' ');
-        console.log(`Fetching tickets for date: ${formattedDate}`);
+        const url = new URL('/service.php/repertoire/list.xml', config.ENDPOINTURL);
+        url.searchParams.append('symfony', sessionToken);
+
+        const response = await axios.get(url.toString(), {
+            headers: {
+                'Cookie': `PHPSESSID=${sessionToken}; symfony=${sessionToken}`,
+                'Accept': 'application/xml',
+                'User-Agent': 'YourAppName/1.0',
+            }
+        });
+
+        fs.writeFileSync('response_getrepertoire.xml', response.data);
+        console.log('Event list response saved to response_getrepertoire.xml');
+
+        // Parse XML to JSON
+        const parser = new xml2js.Parser({ explicitArray: false, mergeAttrs: true });
+        const result = await parser.parseStringPromise(response.data);
         
-        const data = await authenticateAndFetchData(formattedDate);
+        // Log the parsed result for debugging
+        console.log('Parsed event list:', JSON.stringify(result, null, 2));
         
-        if (data.passes && data.passes.length > 0) {
-            saveTicketsToFile(data, currentDate.toISOString().split('T')[0]);
-            updateLatestTicketDate(data);
-            console.log(`Fetch and save process completed for date: ${formattedDate}`);
-        } else {
-            console.log(`No new tickets found for date: ${formattedDate}`);
-        }
-        
-        return data;
+        return result;
     } catch (error) {
-        console.error(`Error during fetch and save process:`, error.message);
+        console.error('Error fetching event list:', error.message);
+        throw error;
     }
 }
 
-function startPeriodicFetch() {
-    console.log('Starting periodic fetch');
-    setInterval(fetchAndSaveTickets, 20000); // Run every 20 seconds
+async function fetchTicketsForEvent(sessionToken, eventId) {
+    console.log(`Fetching tickets for event ${eventId}`);
+    try {
+        const url = new URL(`/service.php/usher/${eventId}/synchronize.xml`, config.ENDPOINTURL);
+        url.searchParams.append('symfony', sessionToken);
+
+        const response = await axios.get(url.toString(), {
+            headers: {
+                'Cookie': `PHPSESSID=${sessionToken}; symfony=${sessionToken}`,
+                'Accept': 'application/xml',
+                'User-Agent': 'YourAppName/1.0',
+            }
+        });
+
+        // Save raw XML response
+        fs.writeFileSync(`response_tickets_event_${eventId}.xml`, response.data);
+        console.log(`Tickets for event ${eventId} saved to response_tickets_event_${eventId}.xml`);
+
+        // Parse XML to JSON
+        const parser = new xml2js.Parser({ explicitArray: false, mergeAttrs: true });
+        const result = await parser.parseStringPromise(response.data);
+        return result;
+    } catch (error) {
+        console.error(`Error fetching tickets for event in sync  ${eventId}:`, error.message);
+        throw error;
+    }
 }
 
-app.get('/fetch', async (req, res) => {
+async function updateEventList() {
+    console.log('Updating event list');
     try {
-        await fetchAndSaveTickets();
-        res.send('Data has been fetched and saved.');
+        const sessionToken = await login();
+        const fetchedEventList = await fetchEventList(sessionToken);
+
+        if (!fetchedEventList || !fetchedEventList.repertoire || !fetchedEventList.repertoire.event) {
+            console.error('No events found in the response');
+            return;
+        }
+
+        eventList = Array.isArray(fetchedEventList.repertoire.event) 
+            ? fetchedEventList.repertoire.event 
+            : [fetchedEventList.repertoire.event];
+
+        console.log(`Updated event list. Found ${eventList.length} events`);
     } catch (error) {
-        res.status(500).send('An error occurred while fetching data.');
+        console.error('Error updating event list:', error.message);
+    }
+}
+
+async function fetchTicketsForAllEvents() {
+    console.log('Starting fetch tickets process for all events');
+    try {
+        const sessionToken = await login();
+
+        for (const event of eventList) {
+            console.log(`Processing event: ${event.name} (ID: ${event.id})`);
+            
+            const ticketData = await fetchTicketsForEvent(sessionToken, event.id);
+            console.log('ticket data fecthed from eevents ', )
+            
+            if (ticketData && ticketData.synchronize && ticketData.synchronize.ticket) {
+                const tickets = Array.isArray(ticketData.synchronize.ticket) 
+                    ? ticketData.synchronize.ticket 
+                    : [ticketData.synchronize.ticket];
+                
+                console.log(`Found ${tickets.length} tickets for event: ${event.name}`);
+                
+                saveTicketsToFile(tickets, `event_${event.id}_${new Date().toISOString().split('T')[0]}`);
+                updateLatestTicketDate(tickets);
+            } else {
+                console.log(`No tickets found for event: ${event.name}`);
+            }
+        }
+    } catch (error) {
+        console.error(`Error during fetch tickets process:`, error.message);
+    }
+}
+
+function startPeriodicEventListUpdate() {
+    console.log('Starting periodic event list update');
+    const intervalHours = config.EVENT_LIST_UPDATE_INTERVAL_HOURS || 6; // Default to 6 hours if not specified
+    const intervalMs = intervalHours * 60 * 60 * 1000;
+    console.log(`Event list update interval set to ${intervalHours} hours`);
+    setInterval(updateEventList, intervalMs);
+    updateEventList(); // Run immediately on start
+}
+
+function startPeriodicTicketFetch() {
+    console.log('Starting periodic ticket fetch');
+    const intervalSeconds = config.TICKET_FETCH_INTERVAL_SECONDS || 60; // Default to 60 seconds if not specified
+    console.log(`Ticket fetch interval set to ${intervalSeconds} seconds`);
+    setInterval(fetchTicketsForAllEvents, intervalSeconds * 1000);
+}
+
+app.get('/fetch-events', async (req, res) => {
+    try {
+        await updateEventList();
+        res.send('Event list has been updated.');
+    } catch (error) {
+        res.status(500).send('An error occurred while updating the event list.');
+    }
+});
+
+app.get('/fetch-tickets', async (req, res) => {
+    try {
+        await fetchTicketsForAllEvents();
+        res.send('Tickets have been fetched and saved for all events.');
+    } catch (error) {
+        res.status(500).send('An error occurred while fetching tickets.');
     }
 });
 
 app.listen(port, () => {
     console.log(`Server is listening on port ${port}`);
-    startPeriodicFetch(); // Start the periodic fetch when the server starts
+    startPeriodicEventListUpdate();
+    startPeriodicTicketFetch();
 });
