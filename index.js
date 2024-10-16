@@ -37,6 +37,10 @@ async function login() {
         console.log(`Received login response. Status: ${response.status}`);
         console.log(`Response data: ${response.data}`);
         
+        // Save the raw XML response
+        fs.writeFileSync('response_login.xml', response.data);
+        console.log('Login response saved to response_login.xml');
+        
         // Parse the XML response
         const parsedResponse = await xml2js.parseStringPromise(response.data);
         
@@ -47,11 +51,8 @@ async function login() {
             throw new Error('Session token not found in the response');
         }
         
-        // Save the token to a file
-        const tokenFilePath = path.join(__dirname, 'token.txt');
-        fs.writeFileSync(tokenFilePath, sessionToken, 'utf-8');
-        console.log(`Session token saved to file: ${tokenFilePath}`);
-
+        console.log(`SESSION ${sessionToken}`);
+        
         return sessionToken;
     } catch (error) {
         console.error('Error during login:', error.message);
@@ -115,52 +116,122 @@ async function authenticateAndFetchData(date, retryCount = 0) {
     }
 }
 
-function saveTicketsToFile(jsonData, date) {
-    console.log(`Saving tickets for date: ${date}`);
+function saveTicketsToFile(tickets, filename) {
     if (!fs.existsSync(outputFolder)) {
-        console.log(`Creating output folder: ${outputFolder}`);
         fs.mkdirSync(outputFolder, { recursive: true });
     }
-    const filename = `${date}.json`;
-    const filePath = path.join(outputFolder, filename);
-    fs.writeFileSync(filePath, JSON.stringify(jsonData, null, 2), 'utf-8');
-    console.log(`Data saved to file: ${filePath}`);
+    const filePath = path.join(outputFolder, `${filename}.json`);
+    fs.writeFileSync(filePath, JSON.stringify(tickets, null, 2), 'utf-8');
+    console.log(`Tickets saved to file: ${filePath}`);
 }
 
-function updateLatestTicketDate(jsonData) {
-    console.log('Updating latest ticket date');
-    if (jsonData.passes && Array.isArray(jsonData.passes)) {
-        const ticketDates = jsonData.passes.map(pass => new Date(pass.buy_date));
-        const maxDate = new Date(Math.max.apply(null, ticketDates));
-        if (!latestTicketDate || maxDate > latestTicketDate) {
-            latestTicketDate = maxDate;
-            console.log(`Latest ticket date updated to: ${latestTicketDate.toISOString()}`);
-        } else {
-            console.log(`Latest ticket date remains: ${latestTicketDate.toISOString()}`);
-        }
-    } else {
-        console.log('No valid passes found in the data');
+function updateLatestTicketDate(tickets) {
+    const ticketDates = tickets.map(ticket => new Date(ticket.date));
+    const maxDate = new Date(Math.max.apply(null, ticketDates));
+    if (!latestTicketDate || maxDate > latestTicketDate) {
+        latestTicketDate = maxDate;
+        console.log(`Latest ticket date updated to: ${latestTicketDate.toISOString()}`);
+    }
+}
+
+async function fetchEventList(sessionToken) {
+    console.log('Fetching event list...');
+    try {
+        const url = new URL('/service.php/repertoire/list.xml', config.ENDPOINTURL);
+        url.searchParams.append('symfony', sessionToken);
+
+        const response = await axios.get(url.toString(), {
+            headers: {
+                'Cookie': `PHPSESSID=${sessionToken}; symfony=${sessionToken}`,
+                'Accept': 'application/xml',
+                'User-Agent': 'YourAppName/1.0',
+            }
+        });
+
+        fs.writeFileSync('response_getrepertoire.xml', response.data);
+        console.log('Event list response saved to response_getrepertoire.xml');
+
+        // Parse XML to JSON
+        const parser = new xml2js.Parser({ explicitArray: false, mergeAttrs: true });
+        const result = await parser.parseStringPromise(response.data);
+        
+        // Log the parsed result for debugging
+        console.log('Parsed event list:', JSON.stringify(result, null, 2));
+        
+        return result;
+    } catch (error) {
+        console.error('Error fetching event list:', error.message);
+        throw error;
+    }
+}
+
+async function fetchTicketsForEvent(sessionToken, eventId) {
+    console.log(`Fetching tickets for event ${eventId}`);
+    try {
+        const url = new URL(`/service.php/usher/${eventId}/synchronize.xml`, config.ENDPOINTURL);
+        url.searchParams.append('symfony', sessionToken);
+
+        const response = await axios.get(url.toString(), {
+            headers: {
+                'Cookie': `PHPSESSID=${sessionToken}; symfony=${sessionToken}`,
+                'Accept': 'application/xml',
+                'User-Agent': 'YourAppName/1.0',
+            }
+        });
+
+        // Save raw XML response
+        fs.writeFileSync(`response_tickets_event_${eventId}.xml`, response.data);
+        console.log(`Tickets for event ${eventId} saved to response_tickets_event_${eventId}.xml`);
+
+        // Parse XML to JSON
+        const parser = new xml2js.Parser({ explicitArray: false, mergeAttrs: true });
+        const result = await parser.parseStringPromise(response.data);
+        return result;
+    } catch (error) {
+        console.error(`Error fetching tickets for event in sync  ${eventId}:`, error.message);
+        throw error;
     }
 }
 
 async function fetchAndSaveTickets() {
     console.log('Starting fetch and save process');
     try {
-        const currentDate = new Date();
-        const formattedDate = currentDate.toISOString().split('.')[0].replace('T', ' ');
-        console.log(`Fetching tickets for date: ${formattedDate}`);
-        
-        const data = await authenticateAndFetchData(formattedDate);
-        
-        if (data.passes && data.passes.length > 0) {
-            saveTicketsToFile(data, currentDate.toISOString().split('T')[0]);
-            updateLatestTicketDate(data);
-            console.log(`Fetch and save process completed for date: ${formattedDate}`);
-        } else {
-            console.log(`No new tickets found for date: ${formattedDate}`);
+        const sessionToken = await login();
+        const eventList = await fetchEventList(sessionToken);
+
+        if (!eventList || !eventList.repertoire || !eventList.repertoire.event) {
+            console.error('No events found in the response');
+            return;
         }
-        
-        return data;
+
+        const events = Array.isArray(eventList.repertoire.event) 
+            ? eventList.repertoire.event 
+            : [eventList.repertoire.event];
+
+        console.log(`Found ${events.length} events`);
+
+        // Process each event
+        for (const event of events) {
+            console.log(`Processing event: ${event.name} (ID: ${event.id})`);
+            
+            const ticketData = await fetchTicketsForEvent(sessionToken, event.id);
+            
+            if (ticketData && ticketData.synchronize && ticketData.synchronize.ticket) {
+                const tickets = Array.isArray(ticketData.synchronize.ticket) 
+                    ? ticketData.synchronize.ticket 
+                    : [ticketData.synchronize.ticket];
+                
+                console.log(`Found ${tickets.length} tickets for event: ${event.name}`);
+                
+                // Save processed ticket data
+                saveTicketsToFile(tickets, `event_${event.id}_${new Date().toISOString().split('T')[0]}`);
+                
+                // Update latest ticket date if necessary
+                updateLatestTicketDate(tickets);
+            } else {
+                console.log(`No tickets found for event: ${event.name}`);
+            }
+        }
     } catch (error) {
         console.error(`Error during fetch and save process:`, error.message);
     }
@@ -168,7 +239,9 @@ async function fetchAndSaveTickets() {
 
 function startPeriodicFetch() {
     console.log('Starting periodic fetch');
-    setInterval(fetchAndSaveTickets, 20000); // Run every 20 seconds
+    const intervalSeconds = config.FETCH_INTERVAL_SECONDS || 3600; // Default to 1 hour if not specified
+    console.log(`Fetch interval set to ${intervalSeconds} seconds`);
+    setInterval(fetchAndSaveTickets, intervalSeconds * 1000);
 }
 
 app.get('/fetch', async (req, res) => {
