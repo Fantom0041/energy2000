@@ -14,7 +14,8 @@ console.log('Configuration loaded from visualtk.ini');
 const app = express();
 const port = process.env.PORT || 3001;
 
-const outputFolder = '/tmp/vnintegration';
+// const outputFolder = '/tmp/vnintegration';
+const outputFolder = 'json';
 const interval = '*/5 * * * *'; // Run every 5 minutes
 let latestTicketDate = null;
 let eventList = [];
@@ -23,6 +24,8 @@ let eventList = [];
 if (!fs.existsSync(outputFolder)) {
     fs.mkdirSync(outputFolder, { recursive: true });
 }
+
+let sessionToken = null;
 
 async function login() {
     console.log('Attempting to log in...');
@@ -47,7 +50,7 @@ async function login() {
         const parsedResponse = await xml2js.parseStringPromise(response.data);
         
         // Extract the session token from the parsed response
-        const sessionToken = parsedResponse.logged.session[0];
+        sessionToken = parsedResponse.logged.session[0];
         
         if (!sessionToken) {
             throw new Error('Session token not found in the response');
@@ -133,7 +136,7 @@ function updateLatestTicketDate(tickets) {
     }
 }
 
-async function fetchEventList(sessionToken) {
+async function fetchEventList() {
     console.log('Fetching event list...');
     try {
         const url = new URL('/service.php/repertoire/list.xml', config.ENDPOINTURL);
@@ -147,15 +150,13 @@ async function fetchEventList(sessionToken) {
             }
         });
 
+        // Save raw XML response
         fs.writeFileSync(path.join(outputFolder, 'response_getrepertoire.xml'), response.data);
         console.log('Event list response saved to response_getrepertoire.xml');
 
         // Parse XML to JSON
         const parser = new xml2js.Parser({ explicitArray: false, mergeAttrs: true });
         const result = await parser.parseStringPromise(response.data);
-        
-        // Log the parsed result for debugging
-        console.log('Parsed event list:', JSON.stringify(result, null, 2));
         
         return result;
     } catch (error) {
@@ -164,7 +165,7 @@ async function fetchEventList(sessionToken) {
     }
 }
 
-async function fetchTicketsForEvent(sessionToken, eventId) {
+async function fetchTicketsForEvent(eventId) {
     console.log(`Fetching tickets for event ${eventId}`);
     try {
         const url = new URL(`/service.php/usher/${eventId}/synchronize.xml`, config.ENDPOINTURL);
@@ -187,7 +188,7 @@ async function fetchTicketsForEvent(sessionToken, eventId) {
         const result = await parser.parseStringPromise(response.data);
         return result;
     } catch (error) {
-        console.error(`Error fetching tickets for event in sync  ${eventId}:`, error.message);
+        console.error(`Error fetching tickets for event ${eventId}:`, error.message);
         throw error;
     }
 }
@@ -195,19 +196,22 @@ async function fetchTicketsForEvent(sessionToken, eventId) {
 async function updateEventList() {
     console.log('Updating event list');
     try {
-        const sessionToken = await login();
-        const fetchedEventList = await fetchEventList(sessionToken);
+        await login(); // Ensure we have a valid session token
+        const fetchedEventList = await fetchEventList();
 
-        if (!fetchedEventList || !fetchedEventList.repertoire || !fetchedEventList.repertoire.event) {
+        if (!fetchedEventList || !fetchedEventList.repertoires || !fetchedEventList.repertoires.repertoire) {
             console.error('No events found in the response');
             return;
         }
 
-        eventList = Array.isArray(fetchedEventList.repertoire.event) 
-            ? fetchedEventList.repertoire.event 
-            : [fetchedEventList.repertoire.event];
+        eventList = Array.isArray(fetchedEventList.repertoires.repertoire) 
+            ? fetchedEventList.repertoires.repertoire 
+            : [fetchedEventList.repertoires.repertoire];
 
         console.log(`Updated event list. Found ${eventList.length} events`);
+        
+        // Immediately fetch tickets for all events after updating the list
+        await fetchTicketsForAllEvents();
     } catch (error) {
         console.error('Error updating event list:', error.message);
     }
@@ -216,25 +220,21 @@ async function updateEventList() {
 async function fetchTicketsForAllEvents() {
     console.log('Starting fetch tickets process for all events');
     try {
-        const sessionToken = await login();
-
         for (const event of eventList) {
-            console.log(`Processing event: ${event.name} (ID: ${event.id})`);
+            console.log(`Processing event: ${event.id}`);
             
-            const ticketData = await fetchTicketsForEvent(sessionToken, event.id);
-            console.log('ticket data fecthed from eevents ', )
+            const ticketData = await fetchTicketsForEvent(event.id);
             
             if (ticketData && ticketData.synchronize && ticketData.synchronize.ticket) {
                 const tickets = Array.isArray(ticketData.synchronize.ticket) 
                     ? ticketData.synchronize.ticket 
                     : [ticketData.synchronize.ticket];
                 
-                console.log(`Found ${tickets.length} tickets for event: ${event.name}`);
+                console.log(`Found ${tickets.length} tickets for event: ${event.id}`);
                 
                 saveTicketsToFile(tickets, `event_${event.id}_${new Date().toISOString().split('T')[0]}`);
-                updateLatestTicketDate(tickets);
             } else {
-                console.log(`No tickets found for event: ${event.name}`);
+                console.log(`No tickets found for event: ${event.id}`);
             }
         }
     } catch (error) {
@@ -244,7 +244,7 @@ async function fetchTicketsForAllEvents() {
 
 function startPeriodicEventListUpdate() {
     console.log('Starting periodic event list update');
-    const intervalHours = config.EVENT_LIST_UPDATE_INTERVAL_HOURS || 6; // Default to 6 hours if not specified
+    const intervalHours = config.EVENT_LIST_UPDATE_INTERVAL_HOURS || 6;
     const intervalMs = intervalHours * 60 * 60 * 1000;
     console.log(`Event list update interval set to ${intervalHours} hours`);
     setInterval(updateEventList, intervalMs);
@@ -253,7 +253,7 @@ function startPeriodicEventListUpdate() {
 
 function startPeriodicTicketFetch() {
     console.log('Starting periodic ticket fetch');
-    const intervalSeconds = config.TICKET_FETCH_INTERVAL_SECONDS || 60; // Default to 60 seconds if not specified
+    const intervalSeconds = config.TICKET_FETCH_INTERVAL_SECONDS || 60;
     console.log(`Ticket fetch interval set to ${intervalSeconds} seconds`);
     setInterval(fetchTicketsForAllEvents, intervalSeconds * 1000);
 }
