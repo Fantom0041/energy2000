@@ -41,6 +41,10 @@ async function login() {
         fs.writeFileSync('response_login.xml', response.data);
         console.log('Login response saved to response_login.xml');
         
+        // Save the raw XML response
+        fs.writeFileSync('response_login.xml', response.data);
+        console.log('Login response saved to response_login.xml');
+        
         // Parse the XML response
         const parsedResponse = await xml2js.parseStringPromise(response.data);
         
