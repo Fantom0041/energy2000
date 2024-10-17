@@ -21,15 +21,10 @@ class EventService {
 
             const filename = this.fileService.getTimestampedFilename('response_getrepertoire');
             
-            if (this.configService.outputFormat === 'json') {
                 const parser = new xml2js.Parser({ explicitArray: false, mergeAttrs: true });
                 const jsonData = await parser.parseStringPromise(response.data);
                 this.fileService.saveToFile(JSON.stringify(jsonData, null, 2), filename);
-            } else {
-                this.fileService.saveToFile(response.data, filename);
-            }
 
-            const parser = new xml2js.Parser({ explicitArray: false, mergeAttrs: true });
             return await parser.parseStringPromise(response.data);
         } catch (error) {
             console.error('Error fetching event list:', error.message);

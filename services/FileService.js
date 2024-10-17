@@ -26,7 +26,8 @@ class FileService {
  
     getTimestampedFilename(prefix, eventId = null) {
         const timestamp = this.getFormattedTimestamp();
-        const extension = this.configService.outputFormat === 'json' ? 'json' : 'xml';
+        // const extension = this.configService.outputFormat === 'json' ? 'json' : 'xml';
+        const extension = 'json';
         return eventId 
             ? `${prefix}_${eventId}_${timestamp}.${extension}`
             : `${prefix}_${timestamp}.${extension}`;
