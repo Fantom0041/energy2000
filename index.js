@@ -8,15 +8,18 @@ const FileService = require('./services/FileService');
 const SchedulerService = require('./services/SchedulerService');
 
 const app = express();
-const port = process.env.PORT || 5001;
+
 
 // Initialize services
 const configService = new ConfigService('./visualtk.ini');
-const fileService = new FileService(configService.get('OUTPUT_FOLDER', 'json'));
+
+const fileService = new FileService(configService.get('OUTPUT_DIR', '/tmp/vnintegration/'));
 const authService = new AuthService(configService, fileService);
 const eventService = new EventService(configService, authService, fileService);
 const ticketService = new TicketService(configService, authService, fileService);
 const schedulerService = new SchedulerService(configService, eventService, ticketService);
+
+const port = configService.get('PORT', '5000');
 
 app.get('/fetch-events', async (req, res) => {
     try {
