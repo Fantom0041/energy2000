@@ -13,7 +13,11 @@ const app = express();
 // Initialize services
 const configService = new ConfigService('./visualtk.ini');
 
-const fileService = new FileService(configService.get('OUTPUT_DIR', '/tmp/vnintegration/'));
+const fileService = new FileService(
+    configService,
+    configService.get('OUTPUT_DIR', '/tmp/vnintegration/')
+);
+
 const authService = new AuthService(configService, fileService);
 const eventService = new EventService(configService, authService, fileService);
 const ticketService = new TicketService(configService, authService, fileService);

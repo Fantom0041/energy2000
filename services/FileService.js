@@ -2,7 +2,8 @@ const fs = require('fs');
 const path = require('path');
 
 class FileService {
-    constructor(outputFolder) {
+    constructor(configService, outputFolder) {
+        this.configService = configService;
         this.outputFolder = outputFolder;
         this.ensureOutputFolderExists();
     }
@@ -22,9 +23,13 @@ class FileService {
         return now.toISOString().replace(/[:T]/g, '-').slice(0, -5);
     }
 
+ 
     getTimestampedFilename(prefix, eventId = null) {
         const timestamp = this.getFormattedTimestamp();
-        return eventId ? `${prefix}_${eventId}_${timestamp}.xml` : `${prefix}_${timestamp}.xml`;
+        const extension = this.configService.outputFormat === 'json' ? 'json' : 'xml';
+        return eventId 
+            ? `${prefix}_${eventId}_${timestamp}.${extension}`
+            : `${prefix}_${timestamp}.${extension}`;
     }
 
     saveToFile(data, filename) {
