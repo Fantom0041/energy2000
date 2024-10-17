@@ -10,6 +10,11 @@ class ConfigService {
     get(key, defaultValue) {
         return this.config[key] || defaultValue;
     }
+
+    // Add this new getter method
+    get outputFormat() {
+        return this.get('OUTPUT_FORMAT', 'json');
+    }
 }
 
 module.exports = ConfigService;
