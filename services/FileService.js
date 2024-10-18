@@ -20,7 +20,10 @@ class FileService {
 
     getFormattedTimestamp() {
         const now = new Date();
-        return now.toISOString().replace(/[:T]/g, '-').slice(0, -5);
+        return now.toISOString()
+            .replace(/T/, '_')  
+            .replace(/:/g, '-') 
+            .slice(0, -5); 
     }
 
  
