@@ -61,7 +61,7 @@ class EventService {
         return {
             'Cookie': `PHPSESSID=${this.authService.getSessionToken()}; symfony=${this.authService.getSessionToken()}`,
             'Accept': 'application/xml',
-            'User-Agent': 'YourAppName/1.0',
+            'User-Agent': 'BaseSystemWebServer/1.0',
         };
     }
 }
