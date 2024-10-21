@@ -6,6 +6,7 @@ const EventService = require('./services/EventService');
 const TicketService = require('./services/TicketService');
 const FileService = require('./services/FileService');
 const SchedulerService = require('./services/SchedulerService');
+// const DataGeneratorService = require('./services/DataGeneratorService');
 
 const app = express();
 
@@ -56,5 +57,12 @@ app.listen(port, async () => {
         console.error('Error during initial data fetch:', error.message);
     }
 
-    schedulerService.startPeriodicUpdates();
+    // schedulerService.startPeriodicUpdates();
 });
+
+// Generate connected data
+// const dataGeneratorService = new DataGeneratorService(fileService);
+// const { repertoireFilename, ticketsFilename } = dataGeneratorService.generateConnectedData();
+
+// console.log(`Generated repertoire file: ${repertoireFilename}`);
+// console.log(`Generated tickets file: ${ticketsFilename}`);
