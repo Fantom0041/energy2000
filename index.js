@@ -57,7 +57,7 @@ app.listen(port, async () => {
         console.error('Error during initial data fetch:', error.message);
     }
 
-    // schedulerService.startPeriodicUpdates();
+    schedulerService.startPeriodicUpdates();
 });
 
 // Generate connected data
